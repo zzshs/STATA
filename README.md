@@ -10,4 +10,4 @@ Weekly working hours are discretized into detailed categories to allow for nonli
 
 The main specifications rely on survey-weighted logistic regression. To evaluate policy-related changes, the analysis adopts a difference-in-differences framework around the 2018 labor policy reform, with treatment and comparison groups defined by employment status. Heterogeneity is explored through interaction models, and pre-trend regressions are used to assess identifying assumptions.
 
-This repository is intended as a methodological portfolio demonstrating survey data construction and policy evaluation in Stata,
+This repository is intended as a methodological portfolio demonstrating survey data construction and policy evaluation in Stata.
