@@ -1,0 +1,355 @@
+// Directory
+cd "C:\대학원\3학기\건강경제학연구"
+clear
+
+
+// Korean encoding settings
+set locale_ui ko_KR
+set locale_functions ko_KR
+
+
+use "C:\대학원\3학기\건강경제학연구\all_data.dta", clear
+
+
+*************************************************************************
+/// Creating table of sociodemographic characteristics
+// (Currently each table is separate, so they will need to be merged manually later)
+// Dividing by unmet medical needs makes the table look cleaner,
+// but it can be rerun differently later if needed
+*************************************************************************
+
+* Create age groups (assuming age variable exists)
+//drop age_group
+gen age_group = .
+
+replace age_group = 1 if inrange(age, 20, 29)
+replace age_group = 2 if inrange(age, 30, 39)
+replace age_group = 3 if inrange(age, 40, 49)
+replace age_group = 4 if inrange(age, 50, 59)
+replace age_group = 5 if inrange(age, 60, 69)
+replace age_group = 6 if age >= 70
+
+label define age_lbl ///
+    1 "20–29" ///
+    2 "30–39" ///
+    3 "40–49" ///
+    4 "50–59" ///
+    5 "60–69" ///
+    6 "70+"
+    
+label values age_group age_lbl
+
+* Categorize years of education
+gen educ_group = .
+replace educ_group = 1 if educ <= 12
+replace educ_group = 2 if inrange(educ, 13, 16)
+replace educ_group = 3 if educ >= 17
+label define educ_lbl 1 "High school or less" 2 "College" 3 "Graduate school or more"
+label values educ_group educ_lbl
+
+* Redefine cohabitation status (derived from c10 or similar variable)
+drop living_with_someone
+gen living_with_someone = .
+replace living_with_someone = 1 if c10 == 0          // Living with someone
+replace living_with_someone = 0 if inrange(c10, 1, 11) // Living alone
+replace living_with_someone = . if c10 == -9         // Missing / no response
+label define living_lbl 1 "Living together" 0 "Living alone"
+label values living_with_someone living_lbl
+
+
+* ▶ Create new health status variable (3 categories: good / fair / poor)
+gen health_cat = .
+
+replace health_cat = 1 if health_3 == 1 | health_4 == 1   // Very good or good
+replace health_cat = 2 if health_5 == 1                   // Fair
+replace health_cat = 3 if health_6 == 1 | health_7 == 1   // Poor or very poor
+
+label define health_lbl 1 "Good" 2 "Fair" 3 "Poor"
+label values health_cat health_lbl
+
+
+//// Sociodemographic table by unmet medical needs //// 
+
+tab female unmet_med, row chi2
+tab age_group unmet_med, row chi2
+tab educ_group unmet_med, row chi2
+tab smoker unmet_med, row chi2
+tab drinker unmet_med, row chi2
+tab living_with_someone unmet_med, row chi2
+tab health_cat unmet_med, row chi2
+
+tab insured unmet_med, row chi2
+tab medicaid unmet_med, row chi2
+
+*******************
+// Reclassified weekly working hours into 3 categories
+*******************
+
+* Weekly working hours (3 groups; reference: 40–49 hours)
+gen workhour_group3 = .
+replace workhour_group3 = 1 if weekly_workhour < 40
+replace workhour_group3 = 2 if inrange(weekly_workhour, 40, 49)
+replace workhour_group3 = 3 if weekly_workhour >= 50
+
+label define wh3_lbl 1 "0–39 hours" 2 "40–49 hours (ref.)" 3 "50+ hours"
+label values workhour_group3 wh3_lbl
+
+
+tab workhour_group3 unmet_med, row chi2
+
+// Logistic regression
+logit unmet_med i.workhour_group3 ///
+      female age_group educ_group ///
+      smoker drinker health_cat ///
+      is_wage_worker is_self_employed ///
+      household_income_decile
+
+***********************************
+// Test whether the effect of working hours on unmet medical needs
+// differs by health status
+***********************************
+
+* ▶ Logistic regression with interaction term
+logit unmet_med i.workhour_group3##i.health_cat ///
+      female age_group educ_group ///
+      smoker drinker ///
+      is_wage_worker is_self_employed ///
+      household_income_decile
+
+*****************************************
+* ▶ Subgroup analysis: individuals with chronic conditions
+*****************************************
+
+logit unmet_med i.workhour_group3 ///
+      female age_group educ_group ///
+      smoker drinker health_cat ///
+      is_wage_worker is_self_employed ///
+      household_income_decile ///
+      if has_chronic == 1
+
+*********************************************************
+// Analysis by reasons for unmet medical needs
+*******************************************************
+
+// 1) Lack of time
+logit unmet_reason_time i.workhour_group3 ///
+      female age_group educ_group ///
+      smoker drinker health_cat ///
+      is_wage_worker is_self_employed ///
+      household_income_decile
+
+// 2) Financial reasons
+logit unmet_reason_cost i.workhour_group3 ///
+      female age_group educ_group ///
+      smoker drinker health_cat ///
+      is_wage_worker is_self_employed ///
+      household_income_decile
+
+// 3) Distance / transportation problems
+logit unmet_reason_distance i.workhour_group3 ///
+      female age_group educ_group ///
+      smoker drinker health_cat ///
+      is_wage_worker is_self_employed ///
+      household_income_decile
+
+******************************************************
+// Panel logistic regression (with fixed effects)
+******************************************************
+
+// Panel setup
+xtset pidwon year
+
+// GEE model with fixed effects
+xtgee unmet_med i.workhour_group3 ///
+      i.age_group i.educ_group ///
+      i.female i.married ///
+      i.smoker i.drinker ///
+      i.health_cat ///
+      i.is_wage_worker i.is_self_employed ///
+      i.is_full_time ///
+      household_income_decile, ///
+      family(binomial) link(logit) corr(independent)
+
+********************************************************************
+// Interaction between working hours and health status (panel GEE)
+********************************************************************
+
+xtset pidwon year
+
+xtgee unmet_med ///
+      i.workhour_group3##i.health_cat ///
+      i.age_group i.educ_group ///
+      i.female i.married ///
+      i.smoker i.drinker ///
+      i.is_wage_worker i.is_self_employed ///
+      i.is_full_time ///
+      household_income_decile, ///
+      family(binomial) link(logit) corr(independent)
+
+*******************************************************************
+// Reason-specific analysis with interaction:
+// unmet_reason_time × workhour_group3 × health_cat
+*******************************************************************
+
+xtset pidwon year
+
+xtgee unmet_reason_time ///
+      i.workhour_group3##i.health_cat ///
+      i.age_group i.educ_group ///
+      i.female i.married ///
+      i.smoker i.drinker ///
+      i.is_wage_worker i.is_self_employed ///
+      i.is_full_time ///
+      household_income_decile, ///
+      family(binomial) link(logit) corr(independent)
+
+**************************************************************
+// GEE interaction analysis for unmet_reason_cost
+**************************************************************
+
+xtset pidwon year
+
+xtgee unmet_reason_cost ///
+      i.workhour_group3##i.health_cat ///
+      i.age_group i.educ_group ///
+      i.female i.married ///
+      i.smoker i.drinker ///
+      i.is_wage_worker i.is_self_employed ///
+      i.is_full_time ///
+      household_income_decile, ///
+      family(binomial) link(logit) corr(independent)
+
+**************************************************************
+// Job autonomy variables and unmet medical needs
+**************************************************************
+
+xtset pidwon year
+
+xtgee unmet_med ///
+      i.workhour_group3 ///
+      i.decision_time i.decision_method i.decision_promotion ///
+      i.age_group i.educ_group i.female ///
+      i.health_cat i.smoker i.drinker ///
+      household_income_decile, ///
+      family(binomial) link(logit) corr(independent)
+
+**************************************************************
+// Relationship between changes in health status and unmet medical needs
+**************************************************************
+
+gen health_cat_lag = L1.health_cat if year != 2011
+
+xtgee unmet_med i.health_cat_lag ///
+      i.workhour_group3 ///
+      i.age_group i.educ_group i.female ///
+      household_income_decile, ///
+      family(binomial) link(logit) corr(independent)
+
+**************************************************************
+// Working hours → absenteeism → unmet medical needs (SEM)
+// Result not significant
+**************************************************************
+/*
+gsem (absent_days <- i.workhour_group3 i.health_cat i.age_group i.female ///
+                    household_income_decile) ///
+     (unmet_med <- i.workhour_group3 absent_days i.health_cat i.age_group i.female ///
+                    household_income_decile), ///
+     logit
+
+estat teffects
+*/
+
+*******************************
+/// 16. Differences in unmet medical needs by day shift status
+
+tab day_shift unmet_med, row chi2
+
+logit unmet_med i.day_shift ///
+     i.age_group i.educ_group i.female i.married ///
+     i.smoker i.drinker i.health_cat ///
+     household_income_decile
+
+*******************************
+/// Differences in unmet medical needs by work type
+tab worktype_day unmet_med, row chi2
+tab worktype_night unmet_med, row chi2
+tab worktype_shift unmet_med, row chi2
+tab worktype_other unmet_med, row chi2
+
+logit unmet_med i.worktype_night i.worktype_shift i.worktype_other ///
+     i.age_group i.educ_group i.female i.married ///
+     i.smoker i.drinker i.health_cat ///
+     household_income_decile
+
+********************
+// Direct association between absenteeism/bedridden status and unmet medical needs
+logit unmet_med i.bedridden i.absent ///
+    i.age_group i.educ_group i.female i.married ///
+    i.smoker i.drinker i.health_cat ///
+    household_income_decile
+
+********************
+// Additional analysis: work schedule patterns (day vs night)
+logit unmet_med i.worktype_night i.worktype_shift i.worktype_other ///
+    i.age_group i.educ_group i.female i.married ///
+    i.smoker i.drinker i.health_cat ///
+    household_income_decile
+
+********************
+// Heterogeneity analysis
+eststo clear
+
+// Define low- and high-income groups (based on income deciles)
+gen low_income = household_income_decile <= 5 if !missing(household_income_decile)
+gen high_income = household_income_decile > 5 if !missing(household_income_decile)
+
+// Regression for low-income group
+logit unmet_med i.workhour_group3 ///
+    i.female i.age_group i.educ_group ///
+    i.smoker i.drinker i.health_cat ///
+    i.is_wage_worker i.is_self_employed ///
+    if low_income == 1
+
+eststo low_income
+
+// Regression for high-income group
+logit unmet_med i.workhour_group3 ///
+    i.female i.age_group i.educ_group ///
+    i.smoker i.drinker i.health_cat ///
+    i.is_wage_worker i.is_self_employed ///
+    if high_income == 1
+
+eststo high_income
+
+esttab low_income high_income, se b(3) star(* 0.1 ** 0.05 *** 0.01) ///
+    label compress replace rtf
+
+********************
+/// Heterogeneity analysis – cluster-based regression (working hour pattern clusters)
+eststo clear
+
+// Generate cluster dummy variables (excluding reference group)
+tab cluster_group, gen(cluster_)
+
+// Logistic regression comparing clusters
+logit unmet_med i.cluster_2 i.cluster_3 i.cluster_4 ///
+    i.female i.age_group i.educ_group ///
+    i.smoker i.drinker i.health_cat ///
+    household_income_decile
+
+********************
+// Alternative approach – interaction between income level and working hours
+
+// Create income group dummies
+gen income_low = household_income_decile <= 5 if !missing(household_income_decile)
+gen income_high = household_income_decile > 5 if !missing(household_income_decile)
+
+// Interaction model
+logit unmet_med i.workhour_group3##i.income_low ///
+    i.female i.age_group i.educ_group ///
+    i.smoker i.drinker i.health_cat ///
+    household_income_decile
+
+********************
+// End
+********************
